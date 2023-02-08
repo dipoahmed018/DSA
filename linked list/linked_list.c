@@ -1,20 +1,20 @@
 #include <stdio.h>
 
-typedef struct link
+struct link
 {
     struct link *previous_item ;
     struct link *next_item;
     int item;
-} link;
+} ;
 
 
 int main () {
-    
-    link list[6];
-
-    list[0].item = 1225;
-    list[1].item = 33;
-    list[0].next_item = &list[1];
-    
-    printf("%d", list[0].item);
+    struct link object1;
+    struct link object2;
+    object1.item = 12;
+    object2.item = 25;
+    object1.next_item = &object2;
+    object2.previous_item = &object1;
+    object1.previous_item = NULL;
+    printf("%d", (1^0)%2);
 }
