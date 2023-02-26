@@ -48,6 +48,20 @@ fn find_lca<'a, 'b>(
     return None;
 }
 
+fn find_depth(root: &Node, target: i32) -> Option<i32> {
+    if root.data == target {
+        return Some(0);
+    }
+
+    for children in &root.childrens {
+        if let Some(depth) = find_depth(children, target) {
+            return Some(depth + 1);
+        }
+    }
+
+    return None;
+}
+
 fn insert(root: &mut Node, parent: i32, child: i32) {
     let mut q: VecDeque<&mut Node> = VecDeque::new();
     q.push_back(root);
@@ -63,6 +77,19 @@ fn insert(root: &mut Node, parent: i32, child: i32) {
 
         for children in n.childrens.iter_mut() {
             q.push_back(children);
+        }
+    }
+}
+
+fn print_distances(root: &Node, queries: Vec<(i32, i32)>) {
+    for query in queries {
+        let mut ancestors: Vec<i32> = vec![];
+        if let Some(lca) = find_lca(&root, query, &mut ancestors) {
+            let depth_one = find_depth(lca, query.0).unwrap();
+            let depth_two = find_depth(lca, query.1).unwrap();
+            println!("{}", depth_one + depth_two);
+        } else {
+            println!("0");
         }
     }
 }
@@ -101,7 +128,7 @@ fn main() {
         childrens: vec![],
     }));
 
-    for i in 0..(i_count - 1) {
+    for i in 0..(i_count - 2) {
         let input_pair: Vec<i32> = lines
             .next()
             .unwrap()
@@ -115,7 +142,7 @@ fn main() {
         insert(&mut root, input_pair[0], input_pair[1]);
     }
 
-    let mut queryset: Vec<HashMap<i32, bool>> = vec![];
+    let mut queryset: Vec<(i32, i32)> = vec![];
     for n in 0..q_count {
         lines.next();
         let mut queries: HashMap<i32, bool> = HashMap::new();
@@ -125,12 +152,14 @@ fn main() {
             let input = input.parse::<i32>().unwrap();
             queries.insert(input, true);
         }
-        queryset.push(queries);
+
+        for (i_idx, i) in queries.iter().enumerate() {
+            let nested_iter = queries.iter().skip(i_idx + 1);
+            for j in nested_iter {
+                queryset.push((*i.0, *j.0));
+            }
+        }
     }
-
-    let mut ancestors: Vec<i32> = vec![];
-    let nodes = (1, 7);
-    let lca = find_lca(&root, nodes, &mut ancestors);
-
-    print!("{:?}", lca);
+    println!("{:?}", root);
+    // print_distances(&root, queryset);
 }
