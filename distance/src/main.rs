@@ -1,165 +1,184 @@
-use std::collections::{HashMap, VecDeque};
-use std::fs::File;
-use std::io::{BufRead, BufReader, Read};
-use std::vec;
+use std::collections::{HashMap, HashSet};
+use std::io::{self, BufRead};
 
-#[derive(Debug)]
-struct Node {
-    pub data: i32,
-    pub childrens: Vec<Box<Node>>,
-}
+const NODE_COUNT: u32 = 200002;
+const LOG_OF_N: usize = 18;
 
-fn find_lca<'a, 'b>(
-    root: &'a Node,
-    nodes: (i32, i32),
-    ancestor: &'b mut Vec<i32>,
-) -> Option<&'a Node> {
-    if root.data == nodes.0 || root.data == nodes.1 {
-        if !ancestor.is_empty() {
-            return Some(root);
-        } else {
-            ancestor.push(root.data);
-        }
-    }
-
-    for child in &root.childrens {
-        let found = find_lca(&child, nodes, ancestor);
-        match found {
-            Some(node) => {
-                if let Some(ancestor_data) = ancestor.first() {
-                    if *ancestor_data == node.data {
-                        return Some(node);
-                    } else {
-                        return Some(root);
-                    }
-                }
-            }
-            _ => {
-                if let Some(ancestor_data) = ancestor.first() {
-                    if child.data == *ancestor_data {
-                        ancestor.pop();
-                        ancestor.push(root.data);
-                    }
-                }
-            }
-        }
-    }
-
-    return None;
-}
-
-fn find_depth(root: &Node, target: i32) -> Option<i32> {
-    if root.data == target {
-        return Some(0);
-    }
-
-    for children in &root.childrens {
-        if let Some(depth) = find_depth(children, target) {
-            return Some(depth + 1);
-        }
-    }
-
-    return None;
-}
-
-fn insert(root: &mut Node, parent: i32, child: i32) {
-    let mut q: VecDeque<&mut Node> = VecDeque::new();
-    q.push_back(root);
-
-    while !q.is_empty() {
-        let n = q.pop_front().unwrap();
-        if n.data == parent {
-            n.childrens.push(Box::new(Node {
-                data: child,
-                childrens: vec![],
-            }));
-        };
-
-        for children in n.childrens.iter_mut() {
-            q.push_back(children);
+fn dfs<'a>(
+    adjacency_list: &'a HashMap<u32, Vec<u32>>,
+    depth_set: &'a mut HashMap<u32, u32>,
+    root: u32,
+    visited: &'a mut HashSet<u32>,
+    depth: u32,
+    parent_set: &'a mut HashMap<u32, u32>,
+) {
+    depth_set.insert(root, depth);
+    visited.insert(root);
+    for child in adjacency_list.get(&root).unwrap() {
+        if !visited.contains(child) {
+            parent_set.insert(*child, root);
+            dfs(
+                adjacency_list,
+                depth_set,
+                *child,
+                visited,
+                depth + 1,
+                parent_set,
+            );
         }
     }
 }
 
-fn print_distances(root: &Node, queries: Vec<(i32, i32)>) {
-    for query in queries {
-        let mut ancestors: Vec<i32> = vec![];
-        if let Some(lca) = find_lca(&root, query, &mut ancestors) {
-            let depth_one = find_depth(lca, query.0).unwrap();
-            let depth_two = find_depth(lca, query.1).unwrap();
-            println!("{}", depth_one + depth_two);
-        } else {
+fn sparse_table(
+    adjacency_list: &HashMap<u32, Vec<u32>>,
+) -> (Vec<Vec<u32>>, HashMap<u32, u32>, HashMap<u32, u32>) {
+    let mut depth_set: HashMap<u32, u32> = HashMap::new();
+    let mut parent_set: HashMap<u32, u32> = HashMap::new();
+
+    dfs(
+        adjacency_list,
+        &mut depth_set,
+        1,
+        &mut HashSet::new(),
+        0,
+        &mut parent_set,
+    );
+    let mut table = vec![vec![0; LOG_OF_N]; NODE_COUNT as usize];
+    for i in 0..NODE_COUNT {
+        table[i as usize][0] = *parent_set.get(&(i as u32)).unwrap_or(&0);
+    }
+
+    for j in 1..(LOG_OF_N as u32) {
+        for i in 0..(NODE_COUNT as u32) {
+            table[i as usize][j as usize] =
+                table[table[i as usize][(j - 1) as usize] as usize][(j - 1) as usize];
+        }
+    }
+
+    return (table, depth_set, parent_set);
+}
+
+fn lca(
+    mut u: usize,
+    mut v: usize,
+    table: &Vec<Vec<u32>>,
+    depth_set: &HashMap<u32, u32>,
+    parent_set: &HashMap<u32, u32>,
+) -> Option<u64> {
+    let depth_u = depth_set.get(&(u as u32));
+    let depth_v = depth_set.get(&(v as u32));
+
+    if let (Some(depth_u), Some(depth_v)) = (depth_u, depth_v) {
+        if depth_u > depth_v {
+            std::mem::swap(&mut u, &mut v);
+        }
+    } else {
+        return None;
+    }
+
+    // // move v up to the same depth as u
+    for j in (0..LOG_OF_N).rev() {
+        if depth_set[&(v as u32)] >= depth_set[&(u as u32)] + (1 << j) {
+            v = table[v as usize][j] as usize;
+        }
+    }
+    // // if u is an ancestor of v, return u
+    if u == v {
+        let depth_lca = depth_set[&(u as u32)];
+        let depth = (((depth_u.unwrap() - depth_lca) as i32).abs()
+            + ((depth_v.unwrap() - depth_lca) as i32).abs()) as u64;
+        return Some(depth);
+    }
+
+    // // // move both nodes up to their lowest common ancestor
+    for j in (0..LOG_OF_N).rev() {
+        if table[u][j] != table[v][j] {
+            u = table[u][j] as usize;
+            v = table[v][j] as usize;
+        }
+    }
+    // the lowest common ancestor is the parent of u or v
+    let depth_lca = depth_set[&(parent_set[&(u as u32)] as u32)];
+    let depth = (((depth_u.unwrap() - depth_lca) as i32).abs()
+        + ((depth_v.unwrap() - depth_lca) as i32).abs()) as u64;
+    return Some(depth);
+}
+
+fn print_output(adjacency_list: &HashMap<u32, Vec<u32>>, query_set: Vec<Vec<(u32, u32)>>) {
+    let (table, depth_set, parent_set) = sparse_table(adjacency_list);
+
+    for query_pairs in query_set {
+        if query_pairs.len() == 0 {
             println!("0");
+            continue;
         }
+        let mut sum: i64 = 0;
+        for (u, v) in query_pairs {
+            if let Some(distance) = lca(u as usize, v as usize, &table, &depth_set, &parent_set) {
+                sum += distance as i64;
+            }
+        }
+        println!("{}", sum % 1000000007);
     }
 }
 
 fn main() {
-    let file = File::open("inputs.text").unwrap();
+    let stdin = io::stdin();
+    let mut lines = stdin.lock().lines().map(Result::unwrap);
 
-    let mut input_string = String::new();
-    let mut reader = BufReader::new(file);
-    reader.read_to_string(&mut input_string);
+    let mut adjacency_list: HashMap<u32, Vec<u32>> = HashMap::new();
+    let mut query_set: Vec<Vec<(u32, u32)>> = Vec::new();
 
-    let mut lines = input_string.lines();
-    let counts = lines
-        .next()
-        .unwrap()
-        .split_whitespace()
-        .map(|c| c.parse::<usize>().unwrap())
-        .collect::<Vec<usize>>();
-    let i_count: usize = counts[0];
-    let q_count: usize = counts[1];
+    // let counts = lines
+    //     .next()
+    //     .unwrap()
+    //     .split_whitespace()
+    //     .map(|i| i.parse::<u32>().unwrap())
+    //     .collect::<Vec<u32>>();
+    // let st = lines
+    // .next().unwrap_or_default();
+   
+    println!("Sparse table == {:?}", lines.count());
+    return;
 
-    let parent_pair = lines
-        .next()
-        .unwrap()
-        .split_whitespace()
-        .map(|i| i.parse::<i32>().unwrap())
-        .collect::<Vec<i32>>();
+    // let (nodes_count, query_count) = (counts[0], counts[1]);
+    // for i in 0..nodes_count - 1 {
+    //     let node_pair = lines
+    //         .next()
+    //         .unwrap()
+    //         .split_whitespace()
+    //         .map(|n| n.parse::<u32>().unwrap())
+    //         .collect::<Vec<u32>>();
 
-    let mut root = Node {
-        data: parent_pair[0],
-        childrens: vec![],
-    };
+    //     adjacency_list
+    //         .entry(node_pair[0])
+    //         .or_insert(vec![node_pair[1]])
+    //         .push(node_pair[1]);
 
-    root.childrens.push(Box::new(Node {
-        data: parent_pair[1],
-        childrens: vec![],
-    }));
+    //     adjacency_list
+    //         .entry(node_pair[1])
+    //         .or_insert(vec![node_pair[1]])
+    //         .push(node_pair[0]);
+    // }
 
-    for i in 0..(i_count - 2) {
-        let input_pair: Vec<i32> = lines
-            .next()
-            .unwrap()
-            .split_whitespace()
-            .map(|i| i.parse::<i32>().unwrap())
-            .collect::<Vec<i32>>();
+    // for _ in 0..query_count {
+    //     lines.next();
+    //     let mut queries_pair: Vec<(u32, u32)> = Vec::new();
 
-        if input_pair[0] == input_pair[1] {
-            continue;
-        }
-        insert(&mut root, input_pair[0], input_pair[1]);
-    }
+    //     let queries = lines
+    //         .next()
+    //         .unwrap()
+    //         .split_whitespace()
+    //         .map(|q| q.parse::<u32>().unwrap())
+    //         .collect::<Vec<u32>>();
 
-    let mut queryset: Vec<(i32, i32)> = vec![];
-    for n in 0..q_count {
-        lines.next();
-        let mut queries: HashMap<i32, bool> = HashMap::new();
-        let inputs = lines.next().unwrap().split_whitespace();
+    //     for (i, u) in queries.iter().enumerate() {
+    //         for v in queries.iter().skip(i + 1) {
+    //             queries_pair.push((*u, *v));
+    //         }
+    //     }
+    //     query_set.push(queries_pair);
+    // }
 
-        for input in inputs {
-            let input = input.parse::<i32>().unwrap();
-            queries.insert(input, true);
-        }
-
-        for (i_idx, i) in queries.iter().enumerate() {
-            let nested_iter = queries.iter().skip(i_idx + 1);
-            for j in nested_iter {
-                queryset.push((*i.0, *j.0));
-            }
-        }
-    }
-    println!("{:?}", root);
-    // print_distances(&root, queryset);
+    // print_output(&adjacency_list, query_set);
 }
